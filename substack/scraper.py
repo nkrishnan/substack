@@ -4,20 +4,35 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .cache import Cache
 from .client import SubstackClient
 from .models import Comment, Like, Post, User
 
 
 def fetch_posts(
-    client: SubstackClient, publication_url: str
+    client: SubstackClient,
+    publication_url: str,
+    *,
+    cache: Optional[Cache] = None,
 ) -> list[Post]:
     """Return all :class:`~substack.models.Post` objects for *publication_url*."""
-    raw = client.get_all_posts(publication_url)
+    cache_key = f"posts:{publication_url}"
+    if cache is not None:
+        raw = cache.get(cache_key)
+        if raw is None:
+            raw = client.get_all_posts(publication_url)
+            cache.set(cache_key, raw)
+    else:
+        raw = client.get_all_posts(publication_url)
     return [Post.from_dict(p, publication_url) for p in raw]
 
 
 def fetch_comments_for_post(
-    client: SubstackClient, publication_url: str, post: Post
+    client: SubstackClient,
+    publication_url: str,
+    post: Post,
+    *,
+    cache: Optional[Cache] = None,
 ) -> list[Comment]:
     """Return a flat list of all :class:`~substack.models.Comment` objects for *post*.
 
@@ -25,43 +40,35 @@ def fetch_comments_for_post(
     function preserves the tree on each :class:`~substack.models.Comment` but
     also returns every node in the flat list so callers can iterate easily.
     """
-    raw = client.get_post_comments(publication_url, post.id)
+    cache_key = f"comments:{publication_url}:{post.id}"
+    if cache is not None:
+        raw = cache.get(cache_key)
+        if raw is None:
+            raw = client.get_post_comments(publication_url, post.id)
+            cache.set(cache_key, raw)
+    else:
+        raw = client.get_post_comments(publication_url, post.id)
     top_level = [Comment.from_dict(c, post) for c in raw]
     return _flatten_comments(top_level)
 
 
-def fetch_all_comments(
-    client: SubstackClient, publication_url: str
-) -> list[Comment]:
-    """Return all comments across every post in *publication_url*."""
-    posts = fetch_posts(client, publication_url)
-    all_comments: list[Comment] = []
-    for post in posts:
-        if post.comment_count == 0:
-            continue
-        comments = fetch_comments_for_post(client, publication_url, post)
-        all_comments.extend(comments)
-    return all_comments
-
-
 def fetch_comment_likes(
-    client: SubstackClient, publication_url: str, comment_id: int
-) -> list[Like]:
-    """Return users who liked *comment_id*."""
-    raw = client.get_comment_likes(publication_url, comment_id)
-    return [Like.from_dict(u, comment_id) for u in raw]
-
-
-def fetch_user_comments(
     client: SubstackClient,
     publication_url: str,
-    user_handle: str,
-) -> list[Comment]:
-    """Return all comments left by *user_handle* in *publication_url*."""
-    all_comments = fetch_all_comments(client, publication_url)
-    return [
-        c for c in all_comments if c.author.handle == user_handle
-    ]
+    comment_id: int,
+    *,
+    cache: Optional[Cache] = None,
+) -> list[Like]:
+    """Return users who liked *comment_id*."""
+    cache_key = f"likes:{publication_url}:{comment_id}"
+    if cache is not None:
+        raw = cache.get(cache_key)
+        if raw is None:
+            raw = client.get_comment_likes(publication_url, comment_id)
+            cache.set(cache_key, raw)
+    else:
+        raw = client.get_comment_likes(publication_url, comment_id)
+    return [Like.from_dict(u, comment_id) for u in raw]
 
 
 # ------------------------------------------------------------------
