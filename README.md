@@ -140,6 +140,7 @@ Options:
 Commands:
   posts           All posts (title, type, date, comment count, …)
   comments        All comments (author, timestamp, likes, body, …)
+  article-comments  Comments for one specific article URL (avoids full publication scan)
   comment-likes   Users who liked a specific comment
 ```
 
@@ -153,6 +154,11 @@ substack posts https://example.substack.com
 substack --cache-dir ~/.cache/substack \
          --output csv \
          comments https://example.substack.com > comments.csv
+
+# Export comments for one article only (useful on very large publications)
+substack --output json \
+         article-comments https://example.substack.com/p/some-article-slug \
+         > article-comments.json
 
 # Who liked comment 12345678?
 substack comment-likes https://example.substack.com --comment-id 12345678

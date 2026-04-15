@@ -67,7 +67,7 @@ def _mock_pub(posts=None, comments=None):
 
 @pytest.fixture()
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ class TestPostsCmd:
         with patch("substack.cli.Publication.load", return_value=pub):
             result = runner.invoke(main, ["--output", "json", "posts", PUBLICATION_URL])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert isinstance(data, list)
         assert data[0]["title"] == "My Post"
 
@@ -97,7 +97,7 @@ class TestPostsCmd:
         with patch("substack.cli.Publication.load", return_value=pub):
             result = runner.invoke(main, ["--output", "csv", "posts", PUBLICATION_URL])
         assert result.exit_code == 0
-        reader = csv.DictReader(io.StringIO(result.output))
+        reader = csv.DictReader(io.StringIO(result.stdout))
         rows = list(reader)
         assert rows[0]["title"] == "My Post"
 
@@ -129,7 +129,7 @@ class TestCommentsCmd:
                 main, ["--output", "json", "comments", PUBLICATION_URL]
             )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert isinstance(data, list)
         handles = {row["author_handle"] for row in data}
         assert "alice" in handles
@@ -141,7 +141,7 @@ class TestCommentsCmd:
                 main, ["--output", "csv", "comments", PUBLICATION_URL]
             )
         assert result.exit_code == 0
-        reader = csv.DictReader(io.StringIO(result.output))
+        reader = csv.DictReader(io.StringIO(result.stdout))
         rows = list(reader)
         assert len(rows) == 2
         assert rows[0]["author_handle"] == "alice"
@@ -153,7 +153,7 @@ class TestCommentsCmd:
             result = runner.invoke(
                 main, ["--output", "csv", "comments", PUBLICATION_URL]
             )
-        reader = csv.DictReader(io.StringIO(result.output))
+        reader = csv.DictReader(io.StringIO(result.stdout))
         row = next(reader)
         assert row["like_count"] == "7"
         assert row["created_at"] != ""
@@ -190,7 +190,7 @@ class TestCommentLikesCmd:
                 ["--output", "json", "comment-likes", PUBLICATION_URL, "--comment-id", "99"],
             )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data[0]["handle"] == "carol"
 
     def test_csv_output(self, runner):
@@ -201,7 +201,7 @@ class TestCommentLikesCmd:
                 ["--output", "csv", "comment-likes", PUBLICATION_URL, "--comment-id", "99"],
             )
         assert result.exit_code == 0
-        reader = csv.DictReader(io.StringIO(result.output))
+        reader = csv.DictReader(io.StringIO(result.stdout))
         rows = list(reader)
         assert len(rows) == 2
         handles = {r["handle"] for r in rows}
@@ -214,3 +214,66 @@ class TestCommentLikesCmd:
             )
         assert result.exit_code == 0
         assert "No likes" in result.output
+
+
+# ---------------------------------------------------------------------------
+# article-comments
+# ---------------------------------------------------------------------------
+
+
+class TestArticleCommentsCmd:
+    ARTICLE_URL = "https://example.substack.com/p/my-post"
+
+    def test_json_output(self, runner):
+        post_row = {"id": 42, "title": "My Post", "slug": "my-post", "type": "newsletter"}
+        comments = [_comment(1, "alice"), _comment(2, "bob")]
+
+        with patch("substack.cli.fetch_comments_for_post", return_value=comments):
+            with patch("substack.client.SubstackClient") as client_cls:
+                client = client_cls.return_value
+                client.get_posts.side_effect = [[post_row]]
+
+                result = runner.invoke(
+                    main,
+                    ["--output", "json", "article-comments", self.ARTICLE_URL],
+                )
+
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        handles = {row["author_handle"] for row in data}
+        assert handles == {"alice", "bob"}
+
+    def test_csv_output(self, runner):
+        post_row = {"id": 42, "title": "My Post", "slug": "my-post", "type": "newsletter"}
+        comments = [_comment(1, "alice", likes=7)]
+
+        with patch("substack.cli.fetch_comments_for_post", return_value=comments):
+            with patch("substack.client.SubstackClient") as client_cls:
+                client = client_cls.return_value
+                client.get_posts.side_effect = [[post_row]]
+
+                result = runner.invoke(
+                    main,
+                    ["--output", "csv", "article-comments", self.ARTICLE_URL],
+                )
+
+        assert result.exit_code == 0
+        reader = csv.DictReader(io.StringIO(result.stdout))
+        rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["author_handle"] == "alice"
+        assert rows[0]["like_count"] == "7"
+
+    def test_slug_not_found(self, runner):
+        with patch("substack.client.SubstackClient") as client_cls:
+            client = client_cls.return_value
+            client.get_posts.side_effect = [[{"id": 1, "slug": "other-post"}], []]
+
+            result = runner.invoke(
+                main,
+                ["article-comments", self.ARTICLE_URL, "--max-pages", "2", "--page-size", "1"],
+            )
+
+        assert result.exit_code != 0
+        assert "Could not find article slug" in result.output
