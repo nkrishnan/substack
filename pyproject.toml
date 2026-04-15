@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "substack"
 version = "0.1.0"
 description = "CLI tool for scraping and analysing Substack publications"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
@@ -17,16 +18,13 @@ dependencies = [
 [project.scripts]
 substack = "substack.cli:main"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-mock>=3.12",
-    "responses>=0.25",
-]
+[tool.poetry]
+packages = [{ include = "substack" }]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["substack*"]
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+pytest-mock = ">=3.12"
+responses = ">=0.25"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

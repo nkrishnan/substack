@@ -11,9 +11,9 @@ you like: pandas, jq, R, Excel, …
 ## Installation
 
 ```bash
-pip install .
+poetry install
 # development / testing:
-pip install -e ".[dev]"
+poetry install --with dev
 ```
 
 ---
@@ -195,6 +195,6 @@ substack/
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
+poetry install --with dev
+poetry run pytest
 ```
