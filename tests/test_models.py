@@ -165,6 +165,37 @@ class TestComment:
         comment = Comment.from_dict(data, post)
         assert comment.author.name == "Unknown"
 
+    def test_from_dict_flat_author_fields(self):
+        """Current post-comments API: author fields sit on the comment itself."""
+        post = _make_post()
+        data = {
+            "id": 105,
+            "body": "Hi",
+            "user_id": 42,
+            "name": "Brian Ross",
+            "handle": "brianross",
+            "photo_url": "https://example.com/p.png",
+        }
+        comment = Comment.from_dict(data, post)
+        assert comment.author.id == 42
+        assert comment.author.name == "Brian Ross"
+        assert comment.author.handle == "brianross"
+
+    def test_parent_id_from_nesting_and_ancestor_path(self):
+        post = _make_post()
+        grandchild = {"id": 3, "body": "c", "ancestor_path": "1.2"}
+        child = {"id": 2, "body": "b", "ancestor_path": "1", "children": [grandchild]}
+        root = {"id": 1, "body": "a", "ancestor_path": "", "children": [child]}
+
+        comment = Comment.from_dict(root, post)
+        assert comment.parent_id is None
+        assert comment.children[0].parent_id == 1
+        assert comment.children[0].children[0].parent_id == 2
+
+        # ancestor_path alone is enough when the comment arrives un-nested.
+        orphan = Comment.from_dict({"id": 3, "body": "c", "ancestor_path": "1.2"}, post)
+        assert orphan.parent_id == 2
+
 
 class TestLike:
     def test_from_dict(self):

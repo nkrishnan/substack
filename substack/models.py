@@ -102,27 +102,45 @@ class Comment:
     children: list["Comment"] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict, post: Post) -> "Comment":
+    def from_dict(
+        cls, data: dict, post: Post, parent_id: Optional[int] = None
+    ) -> "Comment":
         author_data = data.get("author") or {}
         # Some Substack endpoints nest author info under a "user" key.
         if not author_data.get("id"):
             author_data = data.get("user") or author_data
+        # The post-comments endpoint puts author fields directly on the comment.
+        if not author_data.get("id") and data.get("user_id"):
+            author_data = {
+                "id": data["user_id"],
+                "name": data.get("name"),
+                "handle": data.get("handle") or data.get("user_slug") or "",
+                "photo_url": data.get("photo_url"),
+            }
         author = (
             User.from_dict(author_data)
             if author_data.get("id")
             else User(id=0, name="Unknown", handle="")
         )
-        children = [Comment.from_dict(child, post) for child in data.get("children", [])]
+        if data.get("parent_id") is not None:
+            parent_id = data["parent_id"]
+        elif data.get("ancestor_path"):
+            # Dotted path of ancestor comment IDs, root first: "123.456".
+            parent_id = int(str(data["ancestor_path"]).split(".")[-1])
+        children = [
+            Comment.from_dict(child, post, parent_id=data["id"])
+            for child in data.get("children", [])
+        ]
         return cls(
             id=data["id"],
-            body=data.get("body", ""),
+            body=data.get("body") or "",
             post_id=post.id,
             post_title=post.title,
             post_url=post.url,
             author=author,
-            like_count=data.get("reactions", {}).get("❤", 0),
+            like_count=(data.get("reactions") or {}).get("❤", 0),
             created_at=_parse_dt(data.get("date") or data.get("created_at")),
-            parent_id=data.get("parent_id"),
+            parent_id=parent_id,
             children=children,
         )
 

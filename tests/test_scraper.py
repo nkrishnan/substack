@@ -141,7 +141,7 @@ def test_fetch_comments_for_post(client):
 def test_fetch_comment_likes(client):
     responses_lib.add(
         responses_lib.GET,
-        f"{API_BASE}/comment/10/likes",
+        f"{API_BASE}/comment/10/reactors",
         json=_RAW_LIKES,
         status=200,
     )
@@ -179,3 +179,108 @@ def test_flatten_comments_depth():
     parent = Comment(id=1, body="p", post_id=1, post_title="P", post_url="", author=user, children=[child])
     flat = _flatten_comments([parent])
     assert [c.id for c in flat] == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Post pagination
+# ---------------------------------------------------------------------------
+
+
+@responses_lib.activate
+def test_get_all_posts_follows_next_cursor(client):
+    """Current API: dict response with nextCursor; offset must never be sent."""
+    from responses import matchers
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json={"posts": [{"id": 1}, {"id": 2}], "nextCursor": "c1"},
+        match=[matchers.query_param_matcher({"limit": "2"})],
+    )
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json={"posts": [{"id": 3}], "nextCursor": None},
+        match=[matchers.query_param_matcher({"limit": "2", "cursor": "c1"})],
+    )
+
+    posts = client.get_all_posts(PUBLICATION_URL, limit=2)
+    assert [p["id"] for p in posts] == [1, 2, 3]
+    assert all("offset" not in c.request.url for c in responses_lib.calls)
+
+
+@responses_lib.activate
+def test_get_all_posts_stops_on_empty_page_with_cursor(client):
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json={"posts": [{"id": 1}], "nextCursor": "c1"},
+    )
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json={"posts": [], "nextCursor": "c2"},
+    )
+
+    posts = client.get_all_posts(PUBLICATION_URL, limit=1)
+    assert [p["id"] for p in posts] == [1]
+    assert len(responses_lib.calls) == 2
+
+
+@responses_lib.activate
+def test_get_all_posts_legacy_offset_pagination(client):
+    """Legacy API: bare list response paginated by offset."""
+    from responses import matchers
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json=[{"id": 1}, {"id": 2}],
+        match=[matchers.query_param_matcher({"limit": "2"})],
+    )
+    responses_lib.add(
+        responses_lib.GET,
+        f"{API_BASE}/posts",
+        json=[{"id": 3}],
+        match=[matchers.query_param_matcher({"limit": "2", "offset": "2"})],
+    )
+
+    posts = client.get_all_posts(PUBLICATION_URL, limit=2)
+    assert [p["id"] for p in posts] == [1, 2, 3]
+
+
+@responses_lib.activate
+def test_get_retries_on_429(mocker):
+    sleep = mocker.patch("substack.client.time.sleep")
+    client = SubstackClient(rate_limit_delay=0, backoff_base=1)
+    url = f"{API_BASE}/posts"
+    responses_lib.add(responses_lib.GET, url, status=429, headers={"Retry-After": "7"})
+    responses_lib.add(responses_lib.GET, url, status=503)
+    responses_lib.add(responses_lib.GET, url, json={"posts": [], "nextCursor": None})
+
+    assert client.get(url) == {"posts": [], "nextCursor": None}
+    delays = [c.args[0] for c in sleep.call_args_list]
+    assert delays == [0, 7.0, 2.0]  # rate-limit delay, Retry-After, 1 * 2**1
+
+
+@responses_lib.activate
+def test_get_gives_up_after_max_retries(mocker):
+    import requests
+
+    mocker.patch("substack.client.time.sleep")
+    client = SubstackClient(rate_limit_delay=0, max_retries=2)
+    url = f"{API_BASE}/posts"
+    responses_lib.add(responses_lib.GET, url, status=429)
+
+    with pytest.raises(requests.HTTPError):
+        client.get(url)
+    assert len(responses_lib.calls) == 3
+
+
+@responses_lib.activate
+def test_get_post_by_slug(client):
+    responses_lib.add(responses_lib.GET, f"{API_BASE}/posts/post-one", json=_RAW_POSTS[0])
+    responses_lib.add(responses_lib.GET, f"{API_BASE}/posts/missing", status=404)
+
+    assert client.get_post_by_slug(PUBLICATION_URL, "post-one")["id"] == 1
+    assert client.get_post_by_slug(PUBLICATION_URL, "missing") is None

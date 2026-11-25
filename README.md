@@ -170,7 +170,10 @@ substack --output json comments https://example.substack.com \
 
 ### Authentication
 
-Most public data does not need a login.  For private / paywalled content:
+Most public data does not need a login.  Post listings are always public, but
+on many publications comments on paid posts are only returned to paid
+subscribers: without a cookie the API returns an empty list, and
+`article-comments` prints a warning.  For private / paywalled content:
 
 ```bash
 export SUBSTACK_SID="<value of substack.sid cookie from your browser>"

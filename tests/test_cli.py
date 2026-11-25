@@ -231,7 +231,8 @@ class TestArticleCommentsCmd:
         with patch("substack.cli.fetch_comments_for_post", return_value=comments):
             with patch("substack.client.SubstackClient") as client_cls:
                 client = client_cls.return_value
-                client.get_posts.side_effect = [[post_row]]
+                client.get_post_by_slug.return_value = None
+                client.iter_post_pages.return_value = iter([[post_row]])
 
                 result = runner.invoke(
                     main,
@@ -251,7 +252,8 @@ class TestArticleCommentsCmd:
         with patch("substack.cli.fetch_comments_for_post", return_value=comments):
             with patch("substack.client.SubstackClient") as client_cls:
                 client = client_cls.return_value
-                client.get_posts.side_effect = [[post_row]]
+                client.get_post_by_slug.return_value = None
+                client.iter_post_pages.return_value = iter([[post_row]])
 
                 result = runner.invoke(
                     main,
@@ -268,7 +270,8 @@ class TestArticleCommentsCmd:
     def test_slug_not_found(self, runner):
         with patch("substack.client.SubstackClient") as client_cls:
             client = client_cls.return_value
-            client.get_posts.side_effect = [[{"id": 1, "slug": "other-post"}], []]
+            client.get_post_by_slug.return_value = None
+            client.iter_post_pages.return_value = iter([[{"id": 1, "slug": "other-post"}], [{"id": 2, "slug": "another"}], [{"id": 3, "slug": "my-post"}]])
 
             result = runner.invoke(
                 main,
@@ -277,3 +280,29 @@ class TestArticleCommentsCmd:
 
         assert result.exit_code != 0
         assert "Could not find article slug" in result.output
+
+    def test_direct_slug_lookup_skips_scan(self, runner):
+        post_row = {"id": 42, "title": "My Post", "slug": "my-post", "type": "newsletter"}
+
+        with patch("substack.cli.fetch_comments_for_post", return_value=[_comment(1, "alice")]):
+            with patch("substack.client.SubstackClient") as client_cls:
+                client = client_cls.return_value
+                client.get_post_by_slug.return_value = post_row
+
+                result = runner.invoke(main, ["--output", "json", "article-comments", self.ARTICLE_URL])
+
+        assert result.exit_code == 0
+        client.get_post_by_slug.assert_called_once_with("https://example.substack.com", "my-post")
+        client.iter_post_pages.assert_not_called()
+
+    def test_warns_when_comments_hidden(self, runner):
+        post_row = {"id": 42, "title": "My Post", "slug": "my-post", "comment_count": 399}
+
+        with patch("substack.cli.fetch_comments_for_post", return_value=[]):
+            with patch("substack.client.SubstackClient") as client_cls:
+                client_cls.return_value.get_post_by_slug.return_value = post_row
+
+                result = runner.invoke(main, ["--output", "json", "article-comments", self.ARTICLE_URL])
+
+        assert result.exit_code == 0
+        assert "paid subscribers" in result.stderr

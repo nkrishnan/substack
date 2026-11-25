@@ -227,7 +227,7 @@ def _print_comments_table(cc) -> None:
     "--page-size",
     default=20,
     show_default=True,
-    type=click.IntRange(min=1, max=100),
+    type=click.IntRange(min=1, max=50),
     help="Posts fetched per page while resolving article slug to post ID.",
 )
 @click.pass_context
@@ -270,6 +270,13 @@ def article_comments_cmd(
     click.echo(f"Fetching comments for post {post.id} …", err=True)
     post._comments = fetch_comments_for_post(client, publication_url, post, cache=cache)
     cc = post.comments
+    if not len(cc) and post.comment_count:
+        click.echo(
+            f"Warning: post reports {post.comment_count} comment(s) but the API "
+            "returned none. Comments may be restricted to paid subscribers; "
+            "pass --cookie / SUBSTACK_SID from a subscribed account.",
+            err=True,
+        )
 
     if output == "json":
         click.echo(cc.to_json())
@@ -302,21 +309,18 @@ def _find_post_by_slug(
     page_size: int,
     max_pages: int,
 ) -> Post | None:
-    """Find one post by slug via bounded pagination."""
-    offset = 0
-    for _ in range(max_pages):
-        batch = client.get_posts(publication_url, limit=page_size, offset=offset)
-        if not batch:
+    """Find one post by slug: direct lookup first, then bounded pagination."""
+    row = client.get_post_by_slug(publication_url, slug)
+    if row:
+        return Post.from_dict(row, publication_url)
+    for page_num, batch in enumerate(
+        client.iter_post_pages(publication_url, limit=page_size)
+    ):
+        if page_num >= max_pages:
             return None
-
         for row in batch:
             if row.get("slug") == slug:
                 return Post.from_dict(row, publication_url)
-
-        if len(batch) < page_size:
-            return None
-        offset += page_size
-
     return None
 
 
@@ -356,7 +360,7 @@ def comment_likes_cmd(
         click.echo(
             json.dumps(
                 [
-                    {"handle": lk.user.handle, "name": lk.user.name}
+                    {"user_id": lk.user.id, "handle": lk.user.handle, "name": lk.user.name}
                     for lk in likes
                 ],
                 indent=2,
@@ -365,9 +369,9 @@ def comment_likes_cmd(
     elif output == "csv":
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["handle", "name"])
+        writer.writerow(["user_id", "handle", "name"])
         for lk in likes:
-            writer.writerow([lk.user.handle, lk.user.name])
+            writer.writerow([lk.user.id, lk.user.handle, lk.user.name])
         click.echo(buf.getvalue(), nl=False)
     else:
         if not likes:
@@ -375,5 +379,8 @@ def comment_likes_cmd(
             return
         click.echo(f"\nComment {comment_id} — {len(likes)} like(s):\n")
         for lk in likes:
-            name_part = f" ({lk.user.name})" if lk.user.name else ""
-            click.echo(f"  @{lk.user.handle}{name_part}")
+            if lk.user.handle:
+                name_part = f" ({lk.user.name})" if lk.user.name else ""
+                click.echo(f"  @{lk.user.handle}{name_part}")
+            else:
+                click.echo(f"  {lk.user.name} (id {lk.user.id})")
